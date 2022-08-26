@@ -4,6 +4,7 @@ use networkmanager::{
     devices::{Any, Device, Wired, Wireless},
     NetworkManager,
 };
+use std::fmt::Write;
 use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, thread::sleep, time::Duration};
 use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
@@ -52,7 +53,7 @@ pub trait Module {
     fn get_output(&mut self) -> ModuleRes;
 }
 
-pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
+pub fn combine_modules(modules: &mut [Box<dyn Module>]) -> String {
     let mut res = String::from("[");
 
     if let Some(mods) = modules
@@ -61,10 +62,10 @@ pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
             let mut res_inner = String::with_capacity(20);
             match v.get_output() {
                 Ok(modout) => {
-                    res_inner += &format!("{{\"full_text\": \"{}\"", modout.content);
+                    write!(res_inner, "{{\"full_text\": \"{}\"", modout.content).unwrap();
                     let map_optional = |key, val: Option<String>| {
                         val.map(|v| format!(", \"{}\": \"{}\"", key, v))
-                            .unwrap_or("".to_string())
+                            .unwrap_or_else(|| "".to_string())
                     };
                     res_inner += &map_optional("color", modout.color_fg);
                     res_inner += &map_optional("background", modout.color_bg);
@@ -72,7 +73,12 @@ pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
                     res_inner += "}";
                 }
                 Err(Some(mes)) if !mes.is_empty() => {
-                    res_inner += &format!("{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}", mes);
+                    write!(
+                        res_inner,
+                        "{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}",
+                        mes
+                    )
+                    .unwrap();
                 }
                 Err(_) => return None,
             }
@@ -185,7 +191,7 @@ impl Module for TemperatureModule {
             .components()
             .iter()
             .find(|c| c.label() == "CPU")
-            .ok_or("CPU unavailable".to_string())?;
+            .ok_or_else(|| "CPU unavailable".to_string())?;
 
         Ok(ModuleOutput::new(format!("{}°C", cpu.temperature())))
     }
@@ -214,8 +220,8 @@ impl<'a> Module for DiskSpaceModule<'a> {
             .system
             .disks()
             .iter()
-            .find(|d| d.name() == &self.dev[..])
-            .ok_or("Disk unavailable".to_string())?;
+            .find(|d| d.name() == self.dev)
+            .ok_or_else(|| "Disk unavailable".to_string())?;
 
         Ok(ModuleOutput::new(format!(
             "{} GiB",
@@ -253,7 +259,7 @@ impl<'a> Module for NetworkModule<'a> {
                 .flatten()
                 .next()
                 .map(|ip| format!(" {}", Ipv4Addr::from(ip.to_be())))
-                .unwrap_or("".to_string())
+                .unwrap_or_else(|| "".to_string())
         };
         match dev {
             Device::WiFi(dev) => {
@@ -296,7 +302,7 @@ impl<'a> Module for NetworkModule<'a> {
                         .with_color_fg("#ff5555".to_string()))
                 }
             }
-            _ => return Err(Some("Unsupported device".to_string())),
+            _ => Err(Some("Unsupported device".to_string())),
         }
     }
 }
@@ -308,7 +314,7 @@ pub struct BatteryModule<const N: usize> {
 impl<const N: usize> BatteryModule<N> {
     pub fn new(path: [&str; N]) -> Self {
         BatteryModule {
-            dev_path: path.map(|v| PathBuf::from(v)),
+            dev_path: path.map(PathBuf::from),
         }
     }
 }
