@@ -4,7 +4,7 @@ use networkmanager::{
     devices::{Any, Device, Wired, Wireless},
     NetworkManager,
 };
-use std::{net::Ipv4Addr, thread::sleep, time::Duration};
+use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, thread::sleep, time::Duration};
 use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
 macro_rules! boxvec {
@@ -297,6 +297,46 @@ impl<'a> Module for NetworkModule<'a> {
                 }
             }
             _ => return Err(Some("Unsupported device".to_string())),
+        }
+    }
+}
+
+pub struct BatteryModule<const N: usize> {
+    dev_path: [PathBuf; N],
+}
+
+impl<const N: usize> BatteryModule<N> {
+    pub fn new(path: [&str; N]) -> Self {
+        BatteryModule {
+            dev_path: path.map(|v| PathBuf::from(v)),
+        }
+    }
+}
+
+impl<const N: usize> Module for BatteryModule<N> {
+    fn get_output(&mut self) -> ModuleRes {
+        if let Some(res) = self
+            .dev_path
+            .iter()
+            .map(|p| {
+                Some((
+                    read_to_string(p.join("capacity"))
+                        .ok()?
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(0),
+                    read_to_string(p.join("status")).ok()?,
+                ))
+            })
+            .map(|v| match v {
+                Some((cap, _)) => format!(" {:3}%", cap),
+                None => "BAT  ".to_string(),
+            })
+            .reduce(|a, n| a + &n)
+        {
+            Ok(ModuleOutput::new(res))
+        } else {
+            Err(None)
         }
     }
 }

@@ -7,6 +7,10 @@ use modules::*;
 
 fn main() {
     let mut modules: Vec<Box<dyn Module>> = boxvec![
+        BatteryModule::new([
+            "/sys/class/power_supply/BAT0",
+            "/sys/class/power_supply/BAT1"
+        ]),
         NetworkModule::new("enp0s31f6").with_name("E"),
         NetworkModule::new("enp60s0u1u1").with_name("ED"),
         NetworkModule::new("wlp3s0").with_name("W"),
