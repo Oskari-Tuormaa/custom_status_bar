@@ -381,7 +381,9 @@ impl<const N: usize> Module for BatteryModule<N> {
         };
         let ecap = get_measure("energy_full").ok_or(None)?;
         let enow = get_measure("energy_now").ok_or(None)?;
-        let mut out = ModuleOutput::new(format!("{}%", (100 * enow) / ecap));
+        let perc = (100 * enow) / ecap;
+        let bat = char::from_u32(0xf244 - ((5 * perc) / 100) as u32).unwrap_or('');
+        let mut out = ModuleOutput::new(format!("{} {}%", bat, perc));
 
         if let Some(state) = self
             .dev_path
