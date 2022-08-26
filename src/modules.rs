@@ -320,29 +320,41 @@ impl<const N: usize> BatteryModule<N> {
 }
 
 impl<const N: usize> Module for BatteryModule<N> {
+    #[allow(unused)]
     fn get_output(&mut self) -> ModuleRes {
-        if let Some(res) = self
+        let get_measure = |file: &str| {
+            self.dev_path
+                .iter()
+                .map(|p| {
+                    read_to_string(p.join(file))
+                        .map(|v| v.trim().parse::<u64>().ok())
+                        .ok()
+                        .flatten()
+                })
+                .reduce(|a, n| Some(a? + n?))
+                .flatten()
+        };
+        let ecap = get_measure("energy_full").ok_or(None)?;
+        let enow = get_measure("energy_now").ok_or(None)?;
+        let mut out = ModuleOutput::new(format!("{}%", (100 * enow) / ecap));
+
+        if let Some(state) = self
             .dev_path
             .iter()
-            .map(|p| {
-                Some((
-                    read_to_string(p.join("capacity"))
-                        .ok()?
-                        .trim()
-                        .parse::<u32>()
-                        .unwrap_or(0),
-                    read_to_string(p.join("status")).ok()?,
-                ))
+            .map(|p| match read_to_string(p.join("status")) {
+                Ok(mes) if mes.trim() == "Charging" => 1,
+                Ok(mes) if mes.trim() == "Discharging" => -1,
+                _ => 0,
             })
-            .map(|v| match v {
-                Some((cap, _)) => format!(" {:3}%", cap),
-                None => "BAT  ".to_string(),
-            })
-            .reduce(|a, n| a + &n)
+            .find(|v| *v != 0)
         {
-            Ok(ModuleOutput::new(res))
-        } else {
-            Err(None)
+            match state {
+                1 => out = out.with_color_fg("#50fa7b".to_string()),
+                -1 => out = out.with_color_fg("#ff5555".to_string()),
+                _ => (),
+            }
         }
+
+        Ok(out)
     }
 }
