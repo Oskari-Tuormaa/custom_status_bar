@@ -1,6 +1,6 @@
 use chrono::Local;
 use std::{thread::sleep, time::Duration};
-use sysinfo::{ComponentExt, CpuExt, System, SystemExt};
+use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
 macro_rules! boxvec {
     ($($x:expr),*) => {
@@ -174,5 +174,19 @@ impl Module for TemperatureModule {
                 "Temp unavailable".to_string()
             },
         )
+    }
+}
+
+pub struct DiskSpaceModule<'a> {
+    dev: &'a str,
+    system: System,
+}
+
+impl<'a> DiskSpaceModule<'a> {
+    pub fn new(dev: &'a str) -> Self {
+        DiskSpaceModule {
+            dev,
+            system: System::new(),
+        }
     }
 }

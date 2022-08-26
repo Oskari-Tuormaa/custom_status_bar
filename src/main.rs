@@ -10,6 +10,7 @@ use modules::*;
 
 fn main() {
     let mut modules: Vec<Box<dyn Module>> = boxvec![
+        DiskSpaceModule::new("/dev/sda3"),
         TemperatureModule::new(),
         RamModule::new(),
         CpuModule::new(),
