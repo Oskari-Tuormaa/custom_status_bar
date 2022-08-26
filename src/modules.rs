@@ -8,12 +8,6 @@ use std::fmt::Write;
 use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, thread::sleep, time::Duration};
 use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
-macro_rules! boxvec {
-    ($($x:expr),*) => {
-        vec![ $(Box::new($x)),* ]
-    };
-}
-
 #[derive(Default)]
 pub struct ModuleOutput {
     content: String,
@@ -51,46 +45,82 @@ impl ModuleOutput {
 type ModuleRes = Result<ModuleOutput, Option<String>>;
 pub trait Module {
     fn get_output(&mut self) -> ModuleRes;
+    fn rate(&self) -> usize {
+        1
+    }
 }
 
-pub fn combine_modules(modules: &mut [Box<dyn Module>]) -> String {
-    let mut res = String::from("[");
+macro_rules! modules {
+    ($($x:expr),*) => {
+        Modules::new([ $(Box::new($x)),* ])
+    };
+}
 
-    if let Some(mods) = modules
-        .iter_mut()
-        .filter_map(|v| {
-            let mut res_inner = String::with_capacity(20);
-            match v.get_output() {
-                Ok(modout) => {
-                    write!(res_inner, "{{\"full_text\": \"{}\"", modout.content).unwrap();
-                    let map_optional = |key, val: Option<String>| {
-                        val.map(|v| format!(", \"{}\": \"{}\"", key, v))
-                            .unwrap_or_else(|| "".to_string())
-                    };
-                    res_inner += &map_optional("color", modout.color_fg);
-                    res_inner += &map_optional("background", modout.color_bg);
-                    res_inner += &map_optional("border", modout.border);
-                    res_inner += "}";
-                }
-                Err(Some(mes)) if !mes.is_empty() => {
-                    write!(
-                        res_inner,
-                        "{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}",
-                        mes
-                    )
-                    .unwrap();
-                }
-                Err(_) => return None,
-            }
-            Some(res_inner)
-        })
-        .reduce(|a, n| a + ", " + &n)
-    {
-        res += &mods;
+pub struct Modules<const N: usize> {
+    modules: [Box<dyn Module>; N],
+    cache: [String; N],
+    tick: usize,
+}
+
+impl<const N: usize> Modules<N> {
+    pub fn new(modules: [Box<dyn Module>; N]) -> Self {
+        Modules {
+            modules,
+            cache: [(); N].map(|_| String::with_capacity(20)),
+            tick: 0,
+        }
     }
 
-    res += "]";
-    res
+    pub fn combine_modules(&mut self) -> String {
+        let mut res = String::from("[");
+
+        if let Some(mods) = self
+            .modules
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                if self.tick % v.rate() != 0 {
+                    return Some(self.cache[i].clone());
+                }
+
+                let mut res_inner = String::with_capacity(20);
+                match v.get_output() {
+                    Ok(modout) => {
+                        write!(res_inner, "{{\"full_text\": \"{}\"", modout.content).unwrap();
+                        let map_optional = |key, val: Option<String>| {
+                            val.map(|v| format!(", \"{}\": \"{}\"", key, v))
+                                .unwrap_or_else(|| "".to_string())
+                        };
+                        res_inner += &map_optional("color", modout.color_fg);
+                        res_inner += &map_optional("background", modout.color_bg);
+                        res_inner += &map_optional("border", modout.border);
+                        res_inner += "}";
+                    }
+                    Err(Some(mes)) if !mes.is_empty() => {
+                        write!(
+                            res_inner,
+                            "{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}",
+                            mes
+                        )
+                        .unwrap();
+                    }
+                    Err(_) => return None,
+                }
+
+                if v.rate() > 1 {
+                    self.cache[i] = res_inner.clone();
+                }
+                Some(res_inner)
+            })
+            .reduce(|a, n| a + ", " + &n)
+        {
+            res += &mods;
+        }
+
+        res += "]";
+        self.tick += 1;
+        res
+    }
 }
 
 pub struct DateTimeModule;
@@ -124,6 +154,10 @@ impl Module for RamModule {
             ktog(self.system.used_memory()),
             ktog(self.system.total_memory())
         )))
+    }
+
+    fn rate(&self) -> usize {
+        3
     }
 }
 
@@ -195,6 +229,10 @@ impl Module for TemperatureModule {
 
         Ok(ModuleOutput::new(format!("{}°C", cpu.temperature())))
     }
+
+    fn rate(&self) -> usize {
+        5
+    }
 }
 
 pub struct DiskSpaceModule<'a> {
@@ -227,6 +265,10 @@ impl<'a> Module for DiskSpaceModule<'a> {
             "{} GiB",
             disk.available_space() / 1024u64.pow(3)
         )))
+    }
+
+    fn rate(&self) -> usize {
+        5
     }
 }
 
@@ -305,6 +347,10 @@ impl<'a> Module for NetworkModule<'a> {
             _ => Err(Some("Unsupported device".to_string())),
         }
     }
+
+    fn rate(&self) -> usize {
+        5
+    }
 }
 
 pub struct BatteryModule<const N: usize> {
@@ -320,7 +366,6 @@ impl<const N: usize> BatteryModule<N> {
 }
 
 impl<const N: usize> Module for BatteryModule<N> {
-    #[allow(unused)]
     fn get_output(&mut self) -> ModuleRes {
         let get_measure = |file: &str| {
             self.dev_path
@@ -356,5 +401,9 @@ impl<const N: usize> Module for BatteryModule<N> {
         }
 
         Ok(out)
+    }
+
+    fn rate(&self) -> usize {
+        5
     }
 }

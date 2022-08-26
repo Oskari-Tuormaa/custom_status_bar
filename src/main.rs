@@ -6,7 +6,7 @@ use std::{thread::sleep, time::Duration};
 use modules::*;
 
 fn main() {
-    let mut modules: Vec<Box<dyn Module>> = boxvec![
+    let mut modules = modules![
         BatteryModule::new([
             "/sys/class/power_supply/BAT0",
             "/sys/class/power_supply/BAT1"
@@ -22,9 +22,10 @@ fn main() {
     ];
     println!("{{\"version\": 1}}\n[");
 
+    let t_sleep = Duration::from_millis(1000);
     loop {
-        let res = combine_modules(&mut modules);
+        let res = modules.combine_modules();
         println!("{},", res);
-        sleep(Duration::from_secs_f32(0.5));
+        sleep(t_sleep);
     }
 }
