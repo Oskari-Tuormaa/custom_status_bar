@@ -47,7 +47,7 @@ impl ModuleOutput {
     }
 }
 
-type ModuleRes = Result<ModuleOutput, String>;
+type ModuleRes = Result<ModuleOutput, Option<String>>;
 pub trait Module {
     fn get_output(&mut self) -> ModuleRes;
 }
@@ -71,7 +71,7 @@ pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
                     res_inner += &map_optional("border", modout.border);
                     res_inner += "}";
                 }
-                Err(mes) if !mes.is_empty() => {
+                Err(Some(mes)) if !mes.is_empty() => {
                     res_inner += &format!("{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}", mes);
                 }
                 Err(_) => return None,
@@ -246,7 +246,7 @@ impl<'a> Module for NetworkModule<'a> {
         let nm = NetworkManager::new(&dbus);
 
         let name = self.name.unwrap_or(self.device);
-        let dev = nm.get_device_by_ip_iface(self.device).map_err(|_| "")?;
+        let dev = nm.get_device_by_ip_iface(self.device).map_err(|_| None)?;
 
         let ip_from_addr = |addr: Vec<Vec<u32>>| {
             addr.iter()
@@ -296,7 +296,7 @@ impl<'a> Module for NetworkModule<'a> {
                         .with_color_fg("#ff5555".to_string()))
                 }
             }
-            _ => return Err("Unsupported device".to_string()),
+            _ => return Err(Some("Unsupported device".to_string())),
         }
     }
 }
