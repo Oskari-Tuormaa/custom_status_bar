@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 chrono = "0.4"
 sysinfo = "0.25"
+networkmanager = "0.3"
+dbus = "0.9"

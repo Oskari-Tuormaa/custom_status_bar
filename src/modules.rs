@@ -1,5 +1,10 @@
 use chrono::Local;
-use std::{thread::sleep, time::Duration};
+use dbus::blocking::Connection;
+use networkmanager::{
+    devices::{Any, Device, Wired, Wireless},
+    NetworkManager,
+};
+use std::{net::Ipv4Addr, thread::sleep, time::Duration};
 use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
 macro_rules! boxvec {
@@ -42,8 +47,9 @@ impl ModuleOutput {
     }
 }
 
+type ModuleRes = Result<ModuleOutput, String>;
 pub trait Module {
-    fn get_output(&mut self) -> ModuleOutput;
+    fn get_output(&mut self) -> ModuleRes;
 }
 
 pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
@@ -51,19 +57,26 @@ pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
 
     if let Some(mods) = modules
         .iter_mut()
-        .map(|v| {
-            let modout = v.get_output();
+        .filter_map(|v| {
             let mut res_inner = String::with_capacity(20);
-            res_inner += &format!("{{\"full_text\": \"{}\"", modout.content);
-            let map_optional = |key, val: Option<String>| {
-                val.map(|v| format!(", \"{}\": \"{}\"", key, v))
-                    .unwrap_or("".to_string())
-            };
-            res_inner += &map_optional("color", modout.color_fg);
-            res_inner += &map_optional("background", modout.color_bg);
-            res_inner += &map_optional("border", modout.border);
-            res_inner += "}";
-            res_inner
+            match v.get_output() {
+                Ok(modout) => {
+                    res_inner += &format!("{{\"full_text\": \"{}\"", modout.content);
+                    let map_optional = |key, val: Option<String>| {
+                        val.map(|v| format!(", \"{}\": \"{}\"", key, v))
+                            .unwrap_or("".to_string())
+                    };
+                    res_inner += &map_optional("color", modout.color_fg);
+                    res_inner += &map_optional("background", modout.color_bg);
+                    res_inner += &map_optional("border", modout.border);
+                    res_inner += "}";
+                }
+                Err(mes) if !mes.is_empty() => {
+                    res_inner += &format!("{{\"full_text\": \"{}\", \"color\": \"#ff0000\"}}", mes);
+                }
+                Err(_) => return None,
+            }
+            Some(res_inner)
         })
         .reduce(|a, n| a + ", " + &n)
     {
@@ -77,9 +90,9 @@ pub fn combine_modules(modules: &mut Vec<Box<dyn Module>>) -> String {
 pub struct DateTimeModule;
 
 impl Module for DateTimeModule {
-    fn get_output(&mut self) -> ModuleOutput {
+    fn get_output(&mut self) -> ModuleRes {
         let now = Local::now();
-        ModuleOutput::new(now.format("%d/%m/%y %H:%M:%S").to_string())
+        Ok(ModuleOutput::new(now.format("%d/%m/%y %H:%M").to_string()))
     }
 }
 
@@ -96,15 +109,15 @@ impl RamModule {
 }
 
 impl Module for RamModule {
-    fn get_output(&mut self) -> ModuleOutput {
+    fn get_output(&mut self) -> ModuleRes {
         self.system.refresh_memory();
 
         let ktog = |v| v as f32 / 1024. / 1024.;
-        ModuleOutput::new(format!(
+        Ok(ModuleOutput::new(format!(
             "{:.1}/{:.1} GiB",
             ktog(self.system.used_memory()),
             ktog(self.system.total_memory())
-        ))
+        )))
     }
 }
 
@@ -126,27 +139,27 @@ impl CpuModule {
 }
 
 impl Module for CpuModule {
-    fn get_output(&mut self) -> ModuleOutput {
+    fn get_output(&mut self) -> ModuleRes {
         self.system.refresh_cpu();
         sleep(Duration::from_millis(200));
         self.system.refresh_cpu();
 
         let cpus = self.system.cpus();
 
-        let mut out = ModuleOutput::new(
-            cpus.iter()
-                .map(|c| percentage_to_char(c.cpu_usage()).unwrap_or(' '))
-                .fold("".to_string(), |a, n| a + &n.to_string()),
-        )
-        .with_color_bg("#44475a".to_string())
-        .with_border("#000000".to_string());
+        let cpu_sparkline = cpus
+            .iter()
+            .map(|c| percentage_to_char(c.cpu_usage()).unwrap_or(' '))
+            .fold("".to_string(), |a, n| a + &n.to_string());
 
-        let load = cpus.iter().map(|v| v.cpu_usage()).sum::<f32>() / cpus.len() as f32;
-        if load > 80. {
+        let mut out = ModuleOutput::new(cpu_sparkline)
+            .with_color_bg("#44475a".to_string())
+            .with_border("#000000".to_string());
+
+        if self.system.global_cpu_info().cpu_usage() > 80. {
             out = out.with_color_fg("#ff5555".to_string());
         }
 
-        out
+        Ok(out)
     }
 }
 
@@ -163,17 +176,18 @@ impl TemperatureModule {
 }
 
 impl Module for TemperatureModule {
-    fn get_output(&mut self) -> ModuleOutput {
+    fn get_output(&mut self) -> ModuleRes {
         self.system.refresh_components_list();
         self.system.refresh_components();
 
-        ModuleOutput::new(
-            if let Some(cpu) = self.system.components().iter().find(|c| c.label() == "CPU") {
-                format!("{}°C", cpu.temperature())
-            } else {
-                "Temp unavailable".to_string()
-            },
-        )
+        let cpu = self
+            .system
+            .components()
+            .iter()
+            .find(|c| c.label() == "CPU")
+            .ok_or("CPU unavailable".to_string())?;
+
+        Ok(ModuleOutput::new(format!("{}°C", cpu.temperature())))
     }
 }
 
@@ -187,6 +201,102 @@ impl<'a> DiskSpaceModule<'a> {
         DiskSpaceModule {
             dev,
             system: System::new(),
+        }
+    }
+}
+
+impl<'a> Module for DiskSpaceModule<'a> {
+    fn get_output(&mut self) -> ModuleRes {
+        self.system.refresh_disks();
+        self.system.refresh_disks_list();
+
+        let disk = self
+            .system
+            .disks()
+            .iter()
+            .find(|d| d.name() == &self.dev[..])
+            .ok_or("Disk unavailable".to_string())?;
+
+        Ok(ModuleOutput::new(format!(
+            "{} GiB",
+            disk.available_space() / 1024u64.pow(3)
+        )))
+    }
+}
+
+pub struct NetworkModule<'a> {
+    device: &'a str,
+    name: Option<&'a str>,
+}
+
+impl<'a> NetworkModule<'a> {
+    pub fn new(device: &'a str) -> Self {
+        NetworkModule { device, name: None }
+    }
+
+    pub fn with_name(mut self, name: &'a str) -> Self {
+        self.name = Some(name);
+        self
+    }
+}
+
+impl<'a> Module for NetworkModule<'a> {
+    fn get_output(&mut self) -> ModuleRes {
+        let dbus = Connection::new_system().map_err(|_| "dbus unavailable".to_string())?;
+        let nm = NetworkManager::new(&dbus);
+
+        let name = self.name.unwrap_or(self.device);
+        let dev = nm.get_device_by_ip_iface(self.device).map_err(|_| "")?;
+
+        let ip_from_addr = |addr: Vec<Vec<u32>>| {
+            addr.iter()
+                .flatten()
+                .next()
+                .map(|ip| format!(" {}", Ipv4Addr::from(ip.to_be())))
+                .unwrap_or("".to_string())
+        };
+        match dev {
+            Device::WiFi(dev) => {
+                let ap = dev.active_access_point().unwrap();
+                if let (Ok(ssid), Ok(strength), Ok(freq), Ok(Ok(addr))) = (
+                    ap.ssid(),
+                    ap.strength(),
+                    ap.frequency(),
+                    dev.ip4_config().map(|conf| conf.addresses()),
+                ) {
+                    Ok(ModuleOutput::new(format!(
+                        "{}: ({:3}% at {}, {} Mb/s){}",
+                        name,
+                        strength,
+                        ssid,
+                        freq / 1024,
+                        ip_from_addr(addr)
+                    ))
+                    .with_color_fg("#50fa7b".to_string()))
+                } else {
+                    Ok(ModuleOutput::new(format!("{}: down", name))
+                        .with_color_fg("#ff5555".to_string()))
+                }
+            }
+            Device::Ethernet(dev) => {
+                if let (Ok(true), Ok(speed), Ok(Ok(addr))) = (
+                    dev.carrier(),
+                    dev.speed(),
+                    dev.ip4_config().map(|conf| conf.addresses()),
+                ) {
+                    Ok(ModuleOutput::new(format!(
+                        "{}: ({} Mb/s){}",
+                        name,
+                        speed,
+                        ip_from_addr(addr)
+                    ))
+                    .with_color_fg("#50fa7b".to_string()))
+                } else {
+                    Ok(ModuleOutput::new(format!("{}: down", name))
+                        .with_color_fg("#ff5555".to_string()))
+                }
+            }
+            _ => return Err("Unsupported device".to_string()),
         }
     }
 }
