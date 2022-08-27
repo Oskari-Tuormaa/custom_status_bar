@@ -4,7 +4,7 @@ use networkmanager::{
     devices::{Any, Device, Wired, Wireless},
     NetworkManager,
 };
-use std::fmt::Write;
+use std::fmt::{Display, Write};
 use std::{fs::read_to_string, net::Ipv4Addr, path::PathBuf, thread::sleep, time::Duration};
 use sysinfo::{ComponentExt, CpuExt, DiskExt, System, SystemExt};
 
@@ -14,6 +14,8 @@ pub struct ModuleOutput {
     color_fg: Option<String>,
     color_bg: Option<String>,
     border: Option<String>,
+    separator: Option<bool>,
+    separator_block_width: Option<usize>,
 }
 
 impl ModuleOutput {
@@ -23,6 +25,8 @@ impl ModuleOutput {
             color_fg: None,
             color_bg: None,
             border: None,
+            separator: None,
+            separator_block_width: None,
         }
     }
 
@@ -38,6 +42,16 @@ impl ModuleOutput {
 
     pub fn with_border(mut self, border: String) -> Self {
         self.border = Some(border);
+        self
+    }
+
+    pub fn with_separator(mut self, seperator: bool) -> Self {
+        self.separator = Some(seperator);
+        self
+    }
+
+    pub fn with_separator_block_width(mut self, separator_block_width: usize) -> Self {
+        self.separator_block_width = Some(separator_block_width);
         self
     }
 }
@@ -58,15 +72,25 @@ macro_rules! modules {
 
 pub struct Modules<const N: usize> {
     modules: [Box<dyn Module>; N],
-    cache: [String; N],
+    cache: [Option<String>; N],
     tick: usize,
+}
+
+fn map_optional(key: &str, val: Option<impl Display>) -> String {
+    val.map(|v| format!(", \"{}\": {}", key, v))
+        .unwrap_or_else(|| "".to_string())
+}
+
+fn map_optional_quotes(key: &str, val: Option<impl Display>) -> String {
+    val.map(|v| format!(", \"{}\": \"{}\"", key, v))
+        .unwrap_or_else(|| "".to_string())
 }
 
 impl<const N: usize> Modules<N> {
     pub fn new(modules: [Box<dyn Module>; N]) -> Self {
         Modules {
             modules,
-            cache: [(); N].map(|_| String::with_capacity(20)),
+            cache: [(); N].map(|_| None),
             tick: 0,
         }
     }
@@ -80,20 +104,19 @@ impl<const N: usize> Modules<N> {
             .enumerate()
             .filter_map(|(i, v)| {
                 if self.tick % v.rate() != 0 {
-                    return Some(self.cache[i].clone());
+                    return self.cache[i].clone();
                 }
 
                 let mut res_inner = String::with_capacity(20);
                 match v.get_output() {
                     Ok(modout) => {
                         write!(res_inner, "{{\"full_text\": \"{}\"", modout.content).unwrap();
-                        let map_optional = |key, val: Option<String>| {
-                            val.map(|v| format!(", \"{}\": \"{}\"", key, v))
-                                .unwrap_or_else(|| "".to_string())
-                        };
-                        res_inner += &map_optional("color", modout.color_fg);
-                        res_inner += &map_optional("background", modout.color_bg);
-                        res_inner += &map_optional("border", modout.border);
+                        res_inner += &map_optional_quotes("color", modout.color_fg);
+                        res_inner += &map_optional_quotes("background", modout.color_bg);
+                        res_inner += &map_optional_quotes("border", modout.border);
+                        res_inner += &map_optional("separator", modout.separator);
+                        res_inner +=
+                            &map_optional("separator_block_width", modout.separator_block_width);
                         res_inner += "}";
                     }
                     Err(Some(mes)) if !mes.is_empty() => {
@@ -104,11 +127,16 @@ impl<const N: usize> Modules<N> {
                         )
                         .unwrap();
                     }
-                    Err(_) => return None,
+                    Err(_) => {
+                        if v.rate() > 1 {
+                            self.cache[i] = None;
+                        }
+                        return None;
+                    }
                 }
 
                 if v.rate() > 1 {
-                    self.cache[i] = res_inner.clone();
+                    self.cache[i] = Some(res_inner.clone());
                 }
                 Some(res_inner)
             })
@@ -407,5 +435,25 @@ impl<const N: usize> Module for BatteryModule<N> {
 
     fn rate(&self) -> usize {
         5
+    }
+}
+
+pub struct SpacerModule<const N: usize> {
+    data: String,
+}
+
+impl<const N: usize> SpacerModule<N> {
+    pub fn new() -> Self {
+        let mut data = String::with_capacity(N);
+        for _ in 0..N {
+            data.push(' ');
+        }
+        SpacerModule { data }
+    }
+}
+
+impl<const N: usize> Module for SpacerModule<N> {
+    fn get_output(&mut self) -> ModuleRes {
+        Ok(ModuleOutput::new(self.data.clone()))
     }
 }

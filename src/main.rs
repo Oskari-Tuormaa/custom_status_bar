@@ -18,7 +18,8 @@ fn main() {
         TemperatureModule::new(),
         RamModule::new(),
         CpuModule::new(),
-        DateTimeModule
+        DateTimeModule,
+        SpacerModule::<0>::new()
     ];
     println!("{{\"version\": 1}}\n[");
 
