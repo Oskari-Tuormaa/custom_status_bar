@@ -263,13 +263,13 @@ impl Module for TemperatureModule {
     }
 }
 
-pub struct DiskSpaceModule<'a> {
-    dev: &'a str,
+pub struct DiskSpaceModule {
+    dev: &'static str,
     system: System,
 }
 
-impl<'a> DiskSpaceModule<'a> {
-    pub fn new(dev: &'a str) -> Self {
+impl DiskSpaceModule {
+    pub fn new(dev: &'static str) -> Self {
         DiskSpaceModule {
             dev,
             system: System::new(),
@@ -277,7 +277,7 @@ impl<'a> DiskSpaceModule<'a> {
     }
 }
 
-impl<'a> Module for DiskSpaceModule<'a> {
+impl Module for DiskSpaceModule {
     fn get_output(&mut self) -> ModuleRes {
         self.system.refresh_disks();
         self.system.refresh_disks_list();
@@ -300,23 +300,23 @@ impl<'a> Module for DiskSpaceModule<'a> {
     }
 }
 
-pub struct NetworkModule<'a> {
-    device: &'a str,
-    name: Option<&'a str>,
+pub struct NetworkModule {
+    device: &'static str,
+    name: Option<&'static str>,
 }
 
-impl<'a> NetworkModule<'a> {
-    pub fn new(device: &'a str) -> Self {
+impl NetworkModule {
+    pub fn new(device: &'static str) -> Self {
         NetworkModule { device, name: None }
     }
 
-    pub fn with_name(mut self, name: &'a str) -> Self {
+    pub fn with_name(mut self, name: &'static str) -> Self {
         self.name = Some(name);
         self
     }
 }
 
-impl<'a> Module for NetworkModule<'a> {
+impl Module for NetworkModule {
     fn get_output(&mut self) -> ModuleRes {
         let dbus = Connection::new_system().map_err(|_| "dbus unavailable".to_string())?;
         let nm = NetworkManager::new(&dbus);
