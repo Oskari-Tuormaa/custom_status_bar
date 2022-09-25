@@ -7,9 +7,11 @@ use modules::*;
 
 fn main() {
     let mut modules = modules![
-        NetworkModule::new("enp4s0").with_name("E"),
-        DiskSpaceModule::new("/dev/sda3"),
-        DiskSpaceModule::new("/dev/sdb1"),
+        BatteryModule::new([
+            "/sys/class/power_supply/BAT0",
+        ]),
+        NetworkModule::new("wlp0s20f3").with_name("W"),
+        DiskSpaceModule::new("/dev/mapper/vgubuntu-root"),
         TemperatureModule::new(),
         RamModule::new(),
         CpuModule::new(),

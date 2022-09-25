@@ -407,10 +407,10 @@ impl<const N: usize> Module for BatteryModule<N> {
                 .reduce(|a, n| Some(a? + n?))
                 .flatten()
         };
-        let ecap = get_measure("energy_full").ok_or(None)?;
-        let enow = get_measure("energy_now").ok_or(None)?;
+        let ecap = get_measure("charge_full").ok_or(None)?;
+        let enow = get_measure("charge_now").ok_or(None)?;
         let perc = (100 * enow) / ecap;
-        let bat = char::from_u32(0xf244 - ((5 * perc) / 100) as u32).unwrap_or('');
+        let bat = char::from_u32(0xf244 - ((4 * perc + 40) / 100) as u32).unwrap_or('');
         let mut out = ModuleOutput::new(format!("{} {}%", bat, perc));
 
         if let Some(state) = self
