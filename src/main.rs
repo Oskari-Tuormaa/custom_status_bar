@@ -9,12 +9,11 @@ fn main() {
     let mut modules = modules![
         BatteryModule::new([
             "/sys/class/power_supply/BAT0",
-            "/sys/class/power_supply/BAT1"
         ]),
-        NetworkModule::new("enp0s31f6").with_name("E"),
-        NetworkModule::new("enp60s0u1u1").with_name("ED"),
-        NetworkModule::new("wlp3s0").with_name("W"),
-        DiskSpaceModule::new("/dev/sda3"),
+        NetworkModule::new("enp0s13f0u1u1").with_name("E"),
+        NetworkModule::new("enp0s13f0u2u1").with_name("E"),
+        NetworkModule::new("wlan0").with_name("W"),
+        DiskSpaceModule::new("/dev/nvme0n1p3"),
         TemperatureModule::new(),
         RamModule::new(),
         CpuModule::new(),
