@@ -30,6 +30,11 @@ impl ModuleOutput {
         }
     }
 
+    pub fn with_content(mut self, content: String) -> Self {
+        self.content = content;
+        self
+    }
+
     pub fn with_color_fg(mut self, color: String) -> Self {
         self.color_fg = Some(color);
         self
@@ -407,12 +412,17 @@ impl<const N: usize> Module for BatteryModule<N> {
                 .reduce(|a, n| Some(a? + n?))
                 .flatten()
         };
-        let ecap = get_measure("energy_full").ok_or(None)?;
-        let enow = get_measure("energy_now").ok_or(None)?;
+        let ecap = get_measure("charge_full").ok_or(None)?;
+        let enow = get_measure("charge_now").ok_or(None)?;
+        let cnow = get_measure("current_now").ok_or(None)?;
         let perc = (100 * enow) / ecap;
-        let bat = char::from_u32(0xf244 - ((5 * perc) / 100) as u32).unwrap_or('');
-        let mut out = ModuleOutput::new(format!("{} {}%", bat, perc));
 
+        let mut hours_left = 0.;
+        let mut mins_left = 0.;
+        let mut secs_left = 0.;
+
+        let mut out = ModuleOutput::new("".to_string());
+        let bat = char::from_u32(0xf244 - ((4 * perc) / 100) as u32).unwrap_or('');
         if let Some(state) = self
             .dev_path
             .iter()
@@ -424,10 +434,41 @@ impl<const N: usize> Module for BatteryModule<N> {
             .find(|v| *v != 0)
         {
             match state {
-                1 => out = out.with_color_fg("#50fa7b".to_string()),
-                -1 => out = out.with_color_fg("#ff5555".to_string()),
+                1 => {
+                    out = out.with_color_fg("#50fa7b".to_string());
+                    hours_left = (ecap - enow) as f32 / cnow as f32;
+                }
+                -1 => {
+                    out = out.with_color_fg("#ff5555".to_string());
+                    hours_left = enow as f32 / cnow as f32;
+                }
                 _ => (),
             }
+        }
+        mins_left = hours_left.fract() * 60.;
+
+        if hours_left.floor() > 0.0 {
+            out = out.with_content(format!(
+                "{} {}% [{:.0}h {:.0}m]",
+                bat,
+                perc,
+                hours_left.floor(),
+                mins_left.floor()
+            ));
+        } else if mins_left > 0.0 {
+            out = out.with_content(format!(
+                "{} {}% [{:.0}m]",
+                bat,
+                perc,
+                mins_left.floor()
+            ));
+        } else {
+            out = out.with_content(format!(
+                "{} {}%",
+                bat,
+                perc,
+            ));
+
         }
 
         Ok(out)
